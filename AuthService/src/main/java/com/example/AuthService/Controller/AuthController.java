@@ -3,6 +3,7 @@ package com.example.AuthService.Controller;
 import com.example.AuthService.Model.MyUser;
 import com.example.AuthService.Model.MyUserRepository;
 import com.example.AuthService.Services.EmailService;
+import com.example.AuthService.Services.JwtUtil;
 import com.example.AuthService.Services.OtpService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,8 @@ public class AuthController {
     private OtpService otpService;
     @Autowired
     private EmailService emailService;
+    @Autowired
+    private JwtUtil util;
     @PostMapping("/register")
     public String register(@RequestHeader String username, @RequestHeader String email, @RequestHeader String  password, HttpServletResponse response){
        Optional<MyUser> a=repository.findByUsername(username);
@@ -68,5 +71,9 @@ public class AuthController {
             response.setStatus(400);
             return "Invalid email";
         }
+    }
+    @PostMapping("/extractuser")
+    public String username(@RequestHeader String token){
+        return util.extractUser(token).getUsername();
     }
 }
