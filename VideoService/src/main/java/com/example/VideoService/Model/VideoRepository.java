@@ -18,16 +18,6 @@ public interface VideoRepository extends JpaRepository<VideoEntity, String> {
 
     @Transactional
     @Modifying
-    @Query("UPDATE VideoEntity v SET v.likecount = v.likecount + 1 WHERE v.id = :id")
-    void incrementLikeCount(String id);
-
-    @Transactional
-    @Modifying
-    @Query("UPDATE VideoEntity v SET v.dislikecount = v.dislikecount + 1 WHERE v.id = :id")
-    void incrementDislikeCount(String id);
-
-    @Transactional
-    @Modifying
     @Query("UPDATE VideoEntity v SET v.views = v.views + 1 WHERE v.id = :id")
     void incrementViewCount(String id);
 

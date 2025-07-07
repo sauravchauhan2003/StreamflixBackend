@@ -5,21 +5,6 @@ import jakarta.persistence.Id;
 
 @Entity
 public class VideoEntity {
-    public int getDislikecount() {
-        return dislikecount;
-    }
-
-    public void setDislikecount(int dislikecount) {
-        this.dislikecount = dislikecount;
-    }
-
-    public int getLikecount() {
-        return likecount;
-    }
-
-    public void setLikecount(int likecount) {
-        this.likecount = likecount;
-    }
 
     public String getFilepath() {
         return filepath;
@@ -75,7 +60,6 @@ public class VideoEntity {
     private String title;
     private String desc;
     private String filepath;
-    private int likecount;
-    private int dislikecount;
+
     private int views;
 }

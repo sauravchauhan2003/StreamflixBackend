@@ -44,8 +44,6 @@ public class VideoController {
         videoEntity.setUploader(uploader);
         videoEntity.setDesc(desc);
         videoEntity.setTitle(title);
-        videoEntity.setDislikecount(0);
-        videoEntity.setLikecount(0);
         videoEntity.setViews(0);
         videoEntity.setId(UUID.randomUUID().toString());
 
@@ -103,5 +101,5 @@ public class VideoController {
         List<VideoEntity> videos = repository.getPaginatedVideos(size, offset);
         return ResponseEntity.ok(videos);
     }
-
+    
 }
