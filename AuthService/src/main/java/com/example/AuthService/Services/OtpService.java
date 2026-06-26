@@ -27,7 +27,7 @@ public class OtpService {
             removeExpiredOtps();
             generationCount = 0;
         }
-
+        System.out.println(otp);
         return otp;
     }
 

@@ -15,7 +15,7 @@
 	<artifactId>API-Gateway</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>API-Gateway</name>
-	<description>Demo project for Spring Boot</description>
+	<description>Spring Cloud Gateway for Streamflix</description>
 
 	<properties>
 		<java.version>17</java.version>
@@ -23,25 +23,25 @@
 	</properties>
 
 	<dependencies>
-		<!-- Spring Boot and Cloud -->
+		<!-- Spring Cloud Gateway (WebFlux-based reactive gateway) -->
 		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-security</artifactId>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-gateway</artifactId>
 		</dependency>
+
+		<!-- Eureka Client for service discovery -->
 		<dependency>
 			<groupId>org.springframework.cloud</groupId>
 			<artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
 		</dependency>
+
+		<!-- Reactor Netty (already pulled by gateway, explicit for clarity) -->
 		<dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-openfeign</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-web</artifactId>
+			<groupId>io.projectreactor.netty</groupId>
+			<artifactId>reactor-netty-http</artifactId>
 		</dependency>
 
-		<!-- JJWT 0.11.5 (Modern Version) -->
+		<!-- JJWT for JWT validation at the gateway -->
 		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
 			<artifactId>jjwt-api</artifactId>
@@ -55,20 +55,22 @@
 		</dependency>
 		<dependency>
 			<groupId>io.jsonwebtoken</groupId>
-			<artifactId>jjwt-jackson</artifactId> <!-- Uses Jackson as JSON parser -->
+			<artifactId>jjwt-jackson</artifactId>
 			<version>0.11.5</version>
 			<scope>runtime</scope>
+		</dependency>
+
+		<!-- Bucket4j for token-bucket rate limiting -->
+		<dependency>
+			<groupId>com.bucket4j</groupId>
+			<artifactId>bucket4j-core</artifactId>
+			<version>8.14.0</version>
 		</dependency>
 
 		<!-- Testing -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.security</groupId>
-			<artifactId>spring-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

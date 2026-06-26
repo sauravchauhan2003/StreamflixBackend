@@ -8,6 +8,20 @@
 .idea/
 *.iml
 target/
+**/target/
 build/
 logs/
 *.log
+*.jar
+
+# Database files
+*.mv.db
+*.trace.db
+
+# Video content directories (regenerated at runtime)
+**/videos/
+**/hls-videos/
+**/thumbnails/
+
+# Frontend
+frontend/

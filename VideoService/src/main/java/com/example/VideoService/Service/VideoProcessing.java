@@ -12,42 +12,89 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.*;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
 public class VideoProcessing {
+
     @Value("${files.videos}")
     private String folderPath;
 
     @Value("${files.hls-videos}")
     private String hlsPath;
 
+    @Value("${files.thumbnails}")
+    private String thumbnailsPath;
+
     @Autowired
     private VideoRepository repository;
 
     @PostConstruct
     public void init() {
-        File videoFolder = new File(folderPath);
-        File hlsFolder = new File(hlsPath);
+        createDir(folderPath);
+        createDir(hlsPath);
+        createDir(thumbnailsPath);
+    }
 
-        if (!videoFolder.exists()) {
-            videoFolder.mkdir();
-            System.out.println("Video folder created");
-        } else {
-            System.out.println("Video folder already exists");
-        }
+    private void createDir(String path) {
+        File dir = new File(path);
+        if (!dir.exists()) dir.mkdirs();
+    }
 
-        if (!hlsFolder.exists()) {
-            hlsFolder.mkdir();
-            System.out.println("HLS folder created");
-        } else {
-            System.out.println("HLS folder already exists");
+    public VideoEntity save(VideoEntity videoEntity, MultipartFile file, MultipartFile thumbnail) {
+        try {
+            String filename = StringUtils.cleanPath(file.getOriginalFilename());
+            Path videoPath = Paths.get(folderPath, filename);
+            Files.copy(file.getInputStream(), videoPath, StandardCopyOption.REPLACE_EXISTING);
+
+            videoEntity.setFilepath(videoPath.toString());
+            videoEntity.setUploadedAt(LocalDateTime.now());
+
+            VideoEntity saved = repository.save(videoEntity);
+
+            String thumbPath = saveThumbnail(saved.getId(), thumbnail, videoPath);
+            saved.setThumbnailPath(thumbPath);
+            repository.save(saved);
+
+            processVideoToHLS(saved, videoPath);
+            return saved;
+
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
         }
     }
+
+    public String saveThumbnail(String videoId, MultipartFile thumbnailFile, Path videoPath) {
+        try {
+            Path thumbPath = Paths.get(thumbnailsPath, videoId + ".jpg");
+
+            if (thumbnailFile != null && !thumbnailFile.isEmpty()) {
+                Files.copy(thumbnailFile.getInputStream(), thumbPath, StandardCopyOption.REPLACE_EXISTING);
+            } else {
+                ProcessBuilder pb = new ProcessBuilder(
+                        "ffmpeg",
+                        "-y",
+                        "-ss", "00:00:05",
+                        "-i", videoPath.toString(),
+                        "-frames:v", "1",
+                        "-q:v", "2",
+                        thumbPath.toString()
+                );
+                pb.inheritIO();
+                pb.start().waitFor();
+            }
+
+            return thumbPath.toString();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
     @Async
     public void processVideoToHLS(VideoEntity videoEntity, Path videoPath) {
         try {
@@ -56,98 +103,132 @@ public class VideoProcessing {
             Files.createDirectories(hlsOutputDir);
 
             String[][] renditions = {
-                    {"426x240", "400k", "240"},
-                    {"640x360", "800k", "360"},
-                    {"1280x720", "2800k", "720"},
-                    {"1920x1080", "5000k", "1080"}
+                    {"426", "240", "400k", "240"},
+                    {"640", "360", "800k", "360"},
+                    {"1280", "720", "2800k", "720"},
+                    {"1920", "1080", "5000k", "1080"}
             };
 
-            for (String[] rendition : renditions) {
-                String resolution = rendition[0];
-                String bitrate = rendition[1];
-                String name = rendition[2];
+            for (String[] r : renditions) {
+                String w = r[0];
+                String h = r[1];
+                String bitrate = r[2];
+                String name = r[3];
 
-                Path renditionDir = hlsOutputDir.resolve(name);
-                Files.createDirectories(renditionDir);
+                Path dir = hlsOutputDir.resolve(name);
+                Files.createDirectories(dir);
 
-                ProcessBuilder builder = new ProcessBuilder(
-                        "ffmpeg",
-                        "-i", videoPath.toString(),
-                        "-vf", "scale=" + resolution,
-                        "-c:a", "aac",
-                        "-ar", "48000",
-                        "-c:v", "h264",
-                        "-profile:v", "main",
-                        "-crf", "20",
-                        "-sc_threshold", "0",
-                        "-g", "48",
-                        "-keyint_min", "48",
-                        "-b:v", bitrate,
-                        "-maxrate", bitrate,
-                        "-bufsize", "1000k",
-                        "-hls_time", "10",
-                        "-hls_playlist_type", "vod",
-                        "-f", "hls",
-                        "-hls_segment_filename", renditionDir.resolve("file%03d.ts").toString(),
-                        renditionDir.resolve("index.m3u8").toString()
-                );
+                boolean ok = transcodeGPU(videoPath, dir, w, h, bitrate, name, videoId);
 
-                builder.inheritIO();
-                Process process = builder.start();
-                int exitCode = process.waitFor();
-                if (exitCode != 0) {
-                    System.err.println("Failed to generate HLS for " + name + "p");
-                } else {
-                    System.out.println("Generated HLS for " + name + "p");
+                if (!ok) {
+                    System.out.println("Falling back to CPU for " + name + "p");
+                    transcodeCPU(videoPath, dir, w, h, bitrate, name, videoId);
                 }
             }
 
-            // Create master playlist
-            Path masterPlaylist = hlsOutputDir.resolve("master.m3u8");
-            StringBuilder masterContent = new StringBuilder("#EXTM3U\n");
+            // Master playlist
+            Path master = hlsOutputDir.resolve("master.m3u8");
+            StringBuilder sb = new StringBuilder("#EXTM3U\n");
 
-            for (String[] rendition : renditions) {
-                String bandwidth = rendition[1].replace("k", "000");
-                String resolution = rendition[0];
-                String name = rendition[2];
-                masterContent.append("#EXT-X-STREAM-INF:BANDWIDTH=")
-                        .append(bandwidth)
+            for (String[] r : renditions) {
+                sb.append("#EXT-X-STREAM-INF:BANDWIDTH=")
+                        .append(r[2].replace("k", "000"))
                         .append(",RESOLUTION=")
-                        .append(resolution)
-                        .append("\n")
-                        .append(name)
-                        .append("/index.m3u8\n");
+                        .append(r[0]).append("x").append(r[1]).append("\n")
+                        .append(r[3]).append("/index.m3u8\n");
             }
 
-            Files.write(masterPlaylist, masterContent.toString().getBytes());
-            System.out.println("Master playlist created for video ID: " + videoId);
+            Files.write(master, sb.toString().getBytes());
 
-        } catch (IOException | InterruptedException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    public VideoEntity save(VideoEntity videoEntity, MultipartFile file) {
-        try {
-            String filename = StringUtils.cleanPath(file.getOriginalFilename());
-            Path videoPath = Paths.get(folderPath, filename);
-            Files.copy(file.getInputStream(), videoPath, StandardCopyOption.REPLACE_EXISTING);
+    private boolean transcodeGPU(Path input, Path outDir,
+                                 String w, String h, String bitrate,
+                                 String name, String videoId)
+            throws IOException, InterruptedException {
 
-            videoEntity.setFilepath(videoPath.toString());
-            VideoEntity saved = repository.save(videoEntity);
-            processVideoToHLS(saved,videoPath);
-            return saved;
-        } catch (IOException e) {
-            e.printStackTrace();
-            return null;
-        }
-    }
-    public VideoEntity getById(String videoId) {
-        return repository.findById(videoId).orElse(null);
+        System.out.println("[GPU] " + name + "p start");
+
+        ProcessBuilder pb = new ProcessBuilder(
+                "ffmpeg",
+                "-y",
+                "-hwaccel", "cuda",
+                "-hwaccel_output_format", "cuda",
+                "-i", input.toString(),
+
+                "-map", "0:v:0",
+                "-map", "0:a?",
+
+                "-vf", "scale_cuda=w=" + w + ":h=" + h,
+
+                "-c:v", "h264_nvenc",
+                "-preset", "p4",
+                "-rc", "vbr_hq",
+                "-cq", "20",
+                "-b:v", bitrate,
+                "-maxrate", bitrate,
+                "-bufsize", "1000k",
+
+                "-g", "48",
+                "-keyint_min", "48",
+
+                "-c:a", "aac",
+                "-b:a", "128k",
+
+                "-f", "hls",
+                "-hls_time", "10",
+                "-hls_playlist_type", "vod",
+                "-hls_segment_filename", outDir.resolve("file%03d.ts").toString(),
+
+                outDir.resolve("index.m3u8").toString()
+        );
+
+        pb.inheritIO();
+        int code = pb.start().waitFor();
+
+        return code == 0;
     }
 
-    public VideoEntity getByTitle(String title) {
-        return repository.findByTitle(title).orElse(null);
+    private void transcodeCPU(Path input, Path outDir,
+                              String w, String h, String bitrate,
+                              String name, String videoId)
+            throws IOException, InterruptedException {
+
+        ProcessBuilder pb = new ProcessBuilder(
+                "ffmpeg",
+                "-y",
+                "-i", input.toString(),
+
+                "-map", "0:v:0",
+                "-map", "0:a?",
+
+                "-vf", "scale=" + w + ":" + h,
+
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-b:v", bitrate,
+
+                "-c:a", "aac",
+                "-b:a", "128k",
+
+                "-f", "hls",
+                "-hls_time", "10",
+                "-hls_playlist_type", "vod",
+                "-hls_segment_filename", outDir.resolve("file%03d.ts").toString(),
+
+                outDir.resolve("index.m3u8").toString()
+        );
+
+        pb.inheritIO();
+        pb.start().waitFor();
+    }
+
+    public VideoEntity getById(String id) {
+        return repository.findById(id).orElse(null);
     }
 
     public List<VideoEntity> getAll() {

@@ -1,7 +1,11 @@
 package com.example.AuthService.Services;
+
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -10,24 +14,54 @@ public class EmailService {
     @Autowired
     private JavaMailSender mailSender;
 
+    /**
+     * Sends OTP email asynchronously so a SMTP failure doesn't block/crash registration.
+     */
+    @Async
     public void sendOtpEmail(String toEmail, String otp) {
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setTo(toEmail);
-        message.setSubject("Your OTP Code");
-        message.setText("Your One-Time Password (OTP) is: " + otp + "\n\nIt will expire in 10 minutes.");
-
-        mailSender.send(message);
-        System.out.println("✅ OTP sent to " + toEmail);
+        try {
+            MimeMessage msg = mailSender.createMimeMessage();
+            MimeMessageHelper h = new MimeMessageHelper(msg, false, "UTF-8");
+            h.setTo(toEmail);
+            h.setSubject("🔐 Your StreamFlix OTP Code");
+            h.setText(
+                "Hi there!\n\n" +
+                "Your One-Time Password (OTP) to verify your StreamFlix account is:\n\n" +
+                "  ➡  " + otp + "\n\n" +
+                "This OTP will expire in 10 minutes.\n\n" +
+                "If you didn't request this, you can safely ignore this email.\n\n" +
+                "— The StreamFlix Team"
+            );
+            mailSender.send(msg);
+            System.out.println("✅ OTP sent to " + toEmail);
+        } catch (Exception e) {
+            // Log SMTP errors but don't crash — user can still verify if they see OTP in console
+            System.err.println("⚠️ Failed to send OTP email to " + toEmail + ": " + e.getMessage());
+            System.out.println("📋 OTP for " + toEmail + " is: " + otp + " (check console for dev testing)");
+        }
     }
-    public void sendForgotPasswordEmail(String toEmail,String password){
-        SimpleMailMessage message=new SimpleMailMessage();
-        message.setTo(toEmail);
-        message.setSubject("Your Forgotten Password - Account Recovery");
-        message.setText("Hi [User's Name],\n" +
-                "\n" +
-                "As requested, here is the password associated with your account:\n" +
-                "\n" +
-                "\uD83D\uDD10 Password:"+password);
-        System.out.println("✅ Password sent to " + toEmail);
+
+    /**
+     * Sends a forgot-password email asynchronously.
+     */
+    @Async
+    public void sendForgotPasswordEmail(String toEmail, String password) {
+        try {
+            MimeMessage msg = mailSender.createMimeMessage();
+            MimeMessageHelper h = new MimeMessageHelper(msg, false, "UTF-8");
+            h.setTo(toEmail);
+            h.setSubject("🔑 Your StreamFlix Account Password");
+            h.setText(
+                "Hi there!\n\n" +
+                "You requested your account password.\n\n" +
+                "  🔐 Password: " + password + "\n\n" +
+                "For security, please change it after logging in.\n\n" +
+                "— The StreamFlix Team"
+            );
+            mailSender.send(msg);
+            System.out.println("✅ Password recovery email sent to " + toEmail);
+        } catch (Exception e) {
+            System.err.println("⚠️ Failed to send recovery email to " + toEmail + ": " + e.getMessage());
+        }
     }
 }
