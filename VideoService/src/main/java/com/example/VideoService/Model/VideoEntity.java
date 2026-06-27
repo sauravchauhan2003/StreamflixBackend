@@ -15,6 +15,7 @@ public class VideoEntity {
     private String uploader;
     private String title;
     private String desc;
+    private String category;
     private int views;
     private LocalDateTime uploadedAt;
 
@@ -39,6 +40,9 @@ public class VideoEntity {
 
     public String getDesc()                  { return desc; }
     public void   setDesc(String d)          { this.desc = d; }
+
+    public String getCategory()              { return category; }
+    public void   setCategory(String c)      { this.category = c; }
 
     public int    getViews()                 { return views; }
     public void   setViews(int v)            { this.views = v; }

@@ -31,6 +31,9 @@ public class VideoProcessing {
     @Autowired
     private VideoRepository repository;
 
+    @Autowired
+    private AzureBlobService azureBlobService;
+
     @PostConstruct
     public void init() {
         createDir(folderPath);
@@ -139,6 +142,44 @@ public class VideoProcessing {
             }
 
             Files.write(master, sb.toString().getBytes());
+
+            // --- Upload to Azure Blob Storage and cleanup ---
+            if (azureBlobService.isEnabled()) {
+                System.out.println("Uploading processed video data to Azure Blob Storage...");
+                
+                // Upload original video
+                azureBlobService.uploadFile("videos/" + videoPath.getFileName().toString(), videoPath);
+                
+                // Upload thumbnail
+                Path thumbPath = Paths.get(thumbnailsPath, videoId + ".jpg");
+                azureBlobService.uploadFile("thumbnails/" + videoId + ".jpg", thumbPath);
+
+                // Upload master playlist
+                azureBlobService.uploadFile("hls-videos/" + videoId + "/master.m3u8", master);
+
+                // Upload segments and playlists
+                for (String[] r : renditions) {
+                    String name = r[3];
+                    Path dir = hlsOutputDir.resolve(name);
+                    try (java.util.stream.Stream<Path> paths = Files.list(dir)) {
+                        paths.forEach(p -> {
+                            String blobName = "hls-videos/" + videoId + "/" + name + "/" + p.getFileName().toString();
+                            azureBlobService.uploadFile(blobName, p);
+                        });
+                    }
+                }
+                
+                System.out.println("Upload complete. Deleting local files...");
+                Files.deleteIfExists(videoPath);
+                Files.deleteIfExists(thumbPath);
+                
+                // Delete HLS dir recursively
+                try (java.util.stream.Stream<Path> walk = Files.walk(hlsOutputDir)) {
+                    walk.sorted(java.util.Comparator.reverseOrder())
+                        .map(Path::toFile)
+                        .forEach(File::delete);
+                }
+            }
 
         } catch (Exception e) {
             e.printStackTrace();

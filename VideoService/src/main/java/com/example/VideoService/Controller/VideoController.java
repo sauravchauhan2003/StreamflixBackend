@@ -8,10 +8,12 @@ import com.example.VideoService.Model.VideoComment;
 import com.example.VideoService.Model.VideoCommentRepository;
 import com.example.VideoService.Model.CommentInteraction;
 import com.example.VideoService.Model.CommentInteractionRepository;
+import com.example.VideoService.Service.AzureBlobService;
 import com.example.VideoService.Service.FeignClientInterface;
 import com.example.VideoService.Service.VideoProcessing;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -32,6 +35,7 @@ public class VideoController {
 
     @Autowired private FeignClientInterface feignClientInterface;
     @Autowired private VideoProcessing videoProcessing;
+    @Autowired private AzureBlobService azureBlobService;
     @Autowired private VideoRepository repository;
     @Autowired private VideoInteractionRepository interactionRepo;
     @Autowired private VideoCommentRepository commentRepo;
@@ -50,6 +54,7 @@ public class VideoController {
             @RequestParam(value = "thumbnail", required = false) MultipartFile thumbnail,
             @RequestHeader("title")                     String title,
             @RequestHeader("desc")                      String desc,
+            @RequestHeader(value = "category", defaultValue = "all") String category,
             @RequestHeader("Authorization")             String token) {
 
         if (file.isEmpty() || title.isBlank() || desc.isBlank()) {
@@ -73,6 +78,7 @@ public class VideoController {
         video.setUploader(uploader);
         video.setTitle(title);
         video.setDesc(desc);
+        video.setCategory("all".equalsIgnoreCase(category) ? null : category);
         video.setViews(0);
 
         videoProcessing.save(video, file, thumbnail);
@@ -82,6 +88,10 @@ public class VideoController {
     // ── Serve Thumbnail ───────────────────────────────────────────────────────
     @GetMapping("/thumbnails/{videoId}")
     public ResponseEntity<Resource> getThumbnail(@PathVariable String videoId) throws IOException {
+        String blobName = "thumbnails/" + videoId + ".jpg";
+        if (azureBlobService.isEnabled() && azureBlobService.exists(blobName)) {
+            return serveBlob(blobName, "image/jpeg");
+        }
         Path path = Paths.get(thumbnailsPath, videoId + ".jpg");
         if (!Files.exists(path)) return ResponseEntity.notFound().build();
         return serveFile(path, "image/jpeg");
@@ -90,8 +100,12 @@ public class VideoController {
     // ── HLS: Master Playlist ──────────────────────────────────────────────────
     @GetMapping("/{videoId}/master.m3u8")
     public ResponseEntity<Resource> getMasterPlaylist(@PathVariable String videoId) throws IOException {
-        Path path = Paths.get(hlsPath, videoId, "master.m3u8");
         repository.incrementViewCount(videoId);
+        String blobName = "hls-videos/" + videoId + "/master.m3u8";
+        if (azureBlobService.isEnabled() && azureBlobService.exists(blobName)) {
+            return serveBlob(blobName, "application/vnd.apple.mpegurl");
+        }
+        Path path = Paths.get(hlsPath, videoId, "master.m3u8");
         return serveFile(path, "application/vnd.apple.mpegurl");
     }
 
@@ -99,6 +113,10 @@ public class VideoController {
     @GetMapping("/{videoId}/{quality}/index.m3u8")
     public ResponseEntity<Resource> getVariantPlaylist(
             @PathVariable String videoId, @PathVariable String quality) throws IOException {
+        String blobName = "hls-videos/" + videoId + "/" + quality + "/index.m3u8";
+        if (azureBlobService.isEnabled() && azureBlobService.exists(blobName)) {
+            return serveBlob(blobName, "application/vnd.apple.mpegurl");
+        }
         Path path = Paths.get(hlsPath, videoId, quality, "index.m3u8");
         return serveFile(path, "application/vnd.apple.mpegurl");
     }
@@ -109,6 +127,10 @@ public class VideoController {
             @PathVariable String videoId,
             @PathVariable String quality,
             @PathVariable String segment) throws IOException {
+        String blobName = "hls-videos/" + videoId + "/" + quality + "/" + segment;
+        if (azureBlobService.isEnabled() && azureBlobService.exists(blobName)) {
+            return serveBlob(blobName, "video/MP2T");
+        }
         Path path = Paths.get(hlsPath, videoId, quality, segment);
         return serveFile(path, "video/MP2T");
     }
@@ -117,9 +139,14 @@ public class VideoController {
     @GetMapping("/videos")
     public ResponseEntity<List<VideoEntity>> getVideos(
             @RequestParam(defaultValue = "0")  int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "all") String category) {
         if (size > 20) size = 20;
-        return ResponseEntity.ok(repository.getPaginatedVideos(size, page * size));
+        if ("all".equalsIgnoreCase(category)) {
+            return ResponseEntity.ok(repository.getPaginatedVideos(size, page * size));
+        } else {
+            return ResponseEntity.ok(repository.getPaginatedVideosByCategory(category, size, page * size));
+        }
     }
 
     // ── Get Single Video by ID ────────────────────────────────────────────────
@@ -373,6 +400,16 @@ public class VideoController {
     private ResponseEntity<Resource> serveFile(Path path, String contentType) throws IOException {
         if (!Files.exists(path)) return ResponseEntity.notFound().build();
         Resource resource = new UrlResource(path.toUri());
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache")
+                .body(resource);
+    }
+
+    private ResponseEntity<Resource> serveBlob(String blobName, String contentType) {
+        InputStream stream = azureBlobService.downloadStream(blobName);
+        if (stream == null) return ResponseEntity.notFound().build();
+        Resource resource = new InputStreamResource(stream);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
                 .header(HttpHeaders.CACHE_CONTROL, "no-cache")

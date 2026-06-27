@@ -27,6 +27,11 @@ public interface VideoRepository extends JpaRepository<VideoEntity, String> {
             nativeQuery = true)
     List<VideoEntity> getPaginatedVideos(@Param("limit") int limit, @Param("offset") int offset);
 
+    /** Paginated feed by category, sorted by views */
+    @Query(value = "SELECT * FROM video_entity WHERE category = :category ORDER BY views DESC LIMIT :limit OFFSET :offset",
+            nativeQuery = true)
+    List<VideoEntity> getPaginatedVideosByCategory(@Param("category") String category, @Param("limit") int limit, @Param("offset") int offset);
+
     /** Increment view count atomically */
     @Transactional
     @Modifying
